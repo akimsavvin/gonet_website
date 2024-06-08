@@ -1,35 +1,39 @@
-FROM node:18-alpine AS builder
+FROM node:18-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS builder
+# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm
-
-# Copy package.json and pnpm-lock.yaml (if present)
-COPY package.json pnpm-lock.yaml ./
-
-# Install dependencies using pnpm
-RUN pnpm install
-
-# Copy the rest of the application code
+# Copy project files
 COPY . .
 
-# Build the application
+# Enable pnpm
+RUN corepack enable pnpm
+
+# Install dependencies
+RUN pnpm i --frozen-lockfile
+
+# Build
 RUN pnpm run build
 
-# Prune development dependencies
-RUN pnpm prune --prod
-
-FROM node:18-alpine
+# Production image, copy all the files and run next
+FROM node:18
 WORKDIR /app
 
-# Copy build and production node_modules from the builder stage
-COPY --from=builder /app/build build/
-COPY --from=builder /app/node_modules node_modules/
-COPY package.json .
+ENV NODE_ENV production
 
-# Set environment variables
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 gonet
+
+COPY --from=builder --chown=gonet:nodejs /app/package.json .
+COPY --from=builder --chown=gonet:nodejs /app/build build/
+
+USER gonet
+
 EXPOSE 3000
-ENV NODE_ENV=production
 
-# Start the application
-CMD [ "node", "build" ]
+ENV PORT 3000
+
+CMD HOSTNAME="0.0.0.0" node build
